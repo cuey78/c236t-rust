@@ -3,6 +3,7 @@ import St from 'gi://St';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Clutter from 'gi://Clutter';
+import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
@@ -11,8 +12,45 @@ const BIN_FALLBACK = '/usr/bin/c236t-ctl';
 export default class C236TExtension extends Extension {
   enable() {
     this._settings = this.getSettings();
-    this._indicator = new Indicator(this);
-    this._indicator._update();
+    // Direct PanelMenu.Button (no subclass — avoids GType registration).
+    this._button = new PanelMenu.Button(0.0, 'C236T Indicator');
+    this._label = new St.Label({
+      text: 'C236T …',
+      style_class: 'c236t-label',
+      y_align: Clutter.ActorAlign.CENTER,
+    });
+    const box = new St.BoxLayout({ style_class: 'panel-status-menu-box' });
+    box.add_child(this._label);
+    this._button.add_child(box);
+
+    const self = this;
+    this._button.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('C236T — INKBIRD'));
+    this._tempItem = new PopupMenu.PopupMenuItem('Temperature: …');
+    this._outputItem = new PopupMenu.PopupMenuItem('Output: …');
+    this._extraItem = new PopupMenu.PopupMenuItem('…');
+    this._button.menu.addMenuItem(this._tempItem);
+    this._button.menu.addMenuItem(this._outputItem);
+    this._button.menu.addMenuItem(this._extraItem);
+
+    const refresh = new PopupMenu.PopupMenuItem('Refresh now');
+    refresh.connect('activate', () => self._update());
+    this._button.menu.addMenuItem(refresh);
+
+    const mkToggle = (label, setter) => {
+      const sw = new PopupMenu.PopupSwitchMenuItem(label, false);
+      sw.connect('toggled', (item, on) => {
+        self._runBin([setter(on)], () => self._update(), () => self._update());
+      });
+      sw.setSensitive(false);
+      self._button.menu.addMenuItem(sw);
+      return sw;
+    };
+    this._ctrlSw = mkToggle('Temp control', on => `set temp_ctrl_sw=${on ? 'on' : 'off'}`);
+    this._buzSw = mkToggle('Buzzer', on => `set buz_sw=${on ? 'on' : 'off'}`);
+    this._switches = [this._ctrlSw, this._buzSw];
+
+    Main.panel.addToStatusArea('c236t-indicator', this._button, 1, 'right');
+    this._update();
     this._timer = null;
     this._startTimer();
     this._intervalChanged = this._settings.connect('changed::interval', () => {
@@ -25,9 +63,9 @@ export default class C236TExtension extends Extension {
       GLib.source_remove(this._timer);
       this._timer = null;
     }
-    if (this._indicator) {
-      this._indicator.destroy();
-      this._indicator = null;
+    if (this._button) {
+      this._button.destroy();
+      this._button = null;
     }
     if (this._intervalChanged) {
       this._settings.disconnect(this._intervalChanged);
@@ -40,59 +78,13 @@ export default class C236TExtension extends Extension {
     if (this._timer !== null) GLib.source_remove(this._timer);
     const secs = Math.max(10, Math.min(300, this._settings.get_int('interval')));
     this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, secs, () => {
-      this._indicator._update();
-      return true;
-    });
-  }
-}
-
-var Indicator = class Indicator extends PanelMenu.Button {
-  _init(ext) {
-    super._init(0.0, 'C236T Indicator', false);
-    this._ext = ext;
-    this._label = new St.Label({
-      text: 'C236T …',
-      style_class: 'c236t-label',
-      y_align: Clutter.ActorAlign.CENTER,
-    });
-    this.actor.add_child(this._label);
-
-    const self = this;
-    this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('C236T — INKBIRD'));
-    this._tempItem = new PopupMenu.PopupMenuItem('Temperature: …');
-    this._outputItem = new PopupMenu.PopupMenuItem('Output: …');
-    this._extraItem = new PopupMenu.PopupMenuItem('…');
-    this.menu.addMenuItem(this._tempItem);
-    this.menu.addMenuItem(this._outputItem);
-    this.menu.addMenuItem(this._extraItem);
-
-    const refresh = new PopupMenu.PopupMenuItem('Refresh now');
-    refresh.connect('activate', () => self._update());
-    this.menu.addMenuItem(refresh);
-
-    // Quick toggles (best-effort; writes go through the CLI).
-    const mkToggle = (label, dpName, getter, setter) => {
-      const sw = new PopupMenu.PopupSwitchMenuItem(label, false);
-      sw.connect('toggled', (item, on) => {
-        this._runBin([setter(on)], () => self._update());
-      });
-      sw.setSensitive(false);
-      self.menu.addMenuItem(sw);
-      return sw;
-    };
-    this._ctrlSw = mkToggle('Temp control', 'temp_ctrl_sw', null, on => `set temp_ctrl_sw=${on ? 'on' : 'off'}`);
-    this._buzSw = mkToggle('Buzzer', 'buz_sw', null, on => `set buz_sw=${on ? 'on' : 'off'}`);
-    this._switches = [this._ctrlSw, this._buzSw];
-
-    this.connect('button-press-event', (actor, event) => {
-      if (event.button === 1) return Clutter.EVENT_STOP;
       this._update();
-      return Clutter.EVENT_STOP;
+      return true;
     });
   }
 
   _binary() {
-    const b = this._ext._settings.get_string('binary').trim();
+    const b = this._settings.get_string('binary').trim();
     return b || BIN_FALLBACK;
   }
 
@@ -111,7 +103,7 @@ var Indicator = class Indicator extends PanelMenu.Button {
         if (typeof rawTemp !== 'number') throw new Error('no current_temp');
         const temp = rawTemp / 100;
         const unit = unitF ? '°F' : '°C';
-        const showOutput = this._ext._settings.get_boolean('show-output');
+        const showOutput = this._settings.get_boolean('show-output');
         this._label.text = showOutput
             ? `${temp.toFixed(1)}${unit} ${output}`
             : `${temp.toFixed(1)}${unit}`;
@@ -167,4 +159,4 @@ var Indicator = class Indicator extends PanelMenu.Button {
       if (onOk) onOk(out);
     });
   }
-};
+}
