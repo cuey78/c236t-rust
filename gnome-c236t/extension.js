@@ -12,15 +12,16 @@ const BIN_FALLBACK = '/usr/bin/c236t-ctl';
 export default class C236TExtension extends Extension {
   enable() {
     this._settings = this.getSettings();
-    // Direct PanelMenu.Button (no subclass — avoids GType registration).
+    // Icon-only in the top bar; temp shown on hover (tooltip).
     this._button = new PanelMenu.Button(0.0, 'C236T Indicator');
-    this._label = new St.Label({
-      text: 'C236T …',
-      style_class: 'c236t-label',
+    this._icon = new St.Icon({
+      icon_name: 'weather-temperature-symbolic',
+      style_class: 'system-status-icon',
       y_align: Clutter.ActorAlign.CENTER,
     });
+    this._button.set_tooltip_text('C236T …');
     const box = new St.BoxLayout({ style_class: 'panel-status-menu-box' });
-    box.add_child(this._label);
+    box.add_child(this._icon);
     this._button.add_child(box);
 
     const self = this;
@@ -106,9 +107,11 @@ export default class C236TExtension extends Extension {
         const temp = rawTemp / 100;
         const unit = unitF ? '°F' : '°C';
         const showOutput = this._settings.get_boolean('show-output');
-        this._label.text = showOutput
+        const tip = showOutput
             ? `${temp.toFixed(1)}${unit} ${output}`
             : `${temp.toFixed(1)}${unit}`;
+        this._button.set_tooltip_text(tip);
+        this._icon.set_tooltip_text(tip);
         this._tempItem.label.text = `Temperature: ${temp.toFixed(2)}${unit}`;
         this._outputItem.label.text = `Output: ${output}`;
         const fmt = v => (typeof v === 'number' ? `${(v / 100).toFixed(1)}${unit}` : '—');
@@ -120,7 +123,8 @@ export default class C236TExtension extends Extension {
         this._buzSw.setToggleState(buzOn);
         this._switches.forEach(s => s.setSensitive(true));
       } catch (e) {
-        this._label.text = 'C236T n/a';
+        this._button.set_tooltip_text(`C236T n/a: ${e.message || e}`);
+        this._icon.set_tooltip_text(`C236T n/a: ${e.message || e}`);
         this._tempItem.label.text = `Error: ${e.message || e}`;
         this._outputItem.label.text = 'Check config: ~/.config/c236t/c236t.toml';
         this._heatItem.label.text = 'Run: /usr/bin/c236t-ctl status';
@@ -128,7 +132,8 @@ export default class C236TExtension extends Extension {
         this._switches.forEach(s => s.setSensitive(false));
       }
     }, err => {
-      this._label.text = 'C236T err';
+      this._button.set_tooltip_text(`C236T err: ${err}`);
+      this._icon.set_tooltip_text(`C236T err: ${err}`);
       this._tempItem.label.text = `Error: ${err}`;
       this._outputItem.label.text = 'Check: /usr/bin/c236t-ctl status';
       this._heatItem.label.text = 'Check: ~/.config/c236t/c236t.toml';
