@@ -6,6 +6,8 @@ no cloud account, MQTT broker, or phone app involved at runtime.
 
 > For your **own** device only. The controller speaks Tuya local protocol
 > **3.5** (`6699` / AES-GCM) on TCP `6668`. Discovery is UDP `7000`.
+> 
+NOTE: Upfront Disclose: This was Created using AI reverse engineering - Since no one had a working option i made one (with help) , im not a software engineer so anyone can fork this and improve it.
 
 ## Device identification
 
