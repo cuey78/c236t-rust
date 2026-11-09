@@ -149,9 +149,10 @@ export default class C236TExtension extends Extension {
         if (onErr) onErr('communicate failed');
         return;
       }
-      const out = new TextDecoder().decode(stdout);
+      // Gio.Subprocess returns GLib.Bytes — decode via get_data() to Uint8Array.
+      const out = new TextDecoder().decode(stdout.get_data());
       if (p.get_exit_status() !== 0) {
-        const err = new TextDecoder().decode(stderr || new Uint8Array());
+        const err = new TextDecoder().decode(stderr ? stderr.get_data() : new Uint8Array());
         if (onErr) onErr(err.trim() || `exit ${p.get_exit_status()}`);
         return;
       }
