@@ -36,7 +36,6 @@ function tempRow(group, title, dpName, settings) {
   const row = new Adw.SpinRow({
     title,
     adjustment: new Gtk.Adjustment({ lower: -40, upper: 100, step_increment: 0.5, page_increment: 5, value: 25 }),
-    map: value => `${value.toFixed(1)}°`,
     digits: 1,
   });
   row.connect('notify::value', () => {
