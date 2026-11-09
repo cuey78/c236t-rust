@@ -3,8 +3,8 @@ import Gio from 'gi://Gio';
 import Gtk from 'gi://Gtk';
 import { ExtensionPreferences } from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
-function spawnSet(binary, assignments, onDone) {
-  const argv = [binary, 'set', ...assignments];
+function spawnBin(binary, args, onDone) {
+  const argv = [binary, ...args];
   const launcher = new Gio.SubprocessLauncher();
   launcher.set_flags(Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
   let proc = null;
@@ -31,28 +31,14 @@ function spawnSet(binary, assignments, onDone) {
   });
 }
 
-function tempRow(group, title, dpName, settings) {
-  const binary = () => settings.get_string('binary').trim() || '/usr/bin/c236t-ctl';
-  const row = new Adw.SpinRow({
-    title,
-    adjustment: new Gtk.Adjustment({ lower: -40, upper: 100, step_increment: 0.5, page_increment: 5, value: 25 }),
-    digits: 1,
-  });
-  row.connect('notify::value', () => {
-    const v = row.get_value();
-    // Clamp to tenths as the CLI expects degrees.
-    const degrees = Math.round(v * 10) / 10;
-    spawnSet(binary(), [`${dpName}=${degrees}`], (ok, msg) => {
-      log(`C236T prefs set ${dpName}=${degrees}: ${ok ? 'ok' : msg}`);
-    });
-  });
-  group.add(row);
-  return row;
-}
-
 export default class C236TPrefs extends ExtensionPreferences {
   fillPreferencesWindow(window) {
     const settings = this.getSettings();
+    const binary = () => settings.get_string('binary').trim() || '/usr/bin/c236t-ctl';
+
+    // Guard so programmatic fills don't trigger writes.
+    let filling = false;
+
     const page = new Adw.PreferencesPage({
       title: 'C236T Indicator',
       icon_name: 'temperature',
@@ -91,34 +77,75 @@ export default class C236TPrefs extends ExtensionPreferences {
     });
     group.add(outputRow);
 
+    // dp name -> { row, id, divide } for device fill + write-back.
+    const controls = [];
+
+    const makeTempRow = (parent, title, dpName, dpId) => {
+      const row = new Adw.SpinRow({
+        title,
+        adjustment: new Gtk.Adjustment({ lower: -40, upper: 100, step_increment: 0.5, page_increment: 5, value: 25 }),
+        digits: 1,
+      });
+      row.connect('notify::value', () => {
+        if (filling) return;
+        const degrees = Math.round(row.get_value() * 10) / 10;
+        spawnBin(binary(), ['set', `${dpName}=${degrees}`], (ok, msg) => {
+          log(`C236T prefs set ${dpName}=${degrees}: ${ok ? 'ok' : msg}`);
+        });
+      });
+      parent.add(row);
+      controls.push({ row, dpId, divide: 100 });
+      return row;
+    };
+
     const control = new Adw.PreferencesGroup({
       title: 'Temperature control',
-      description: 'Changing a value writes it immediately via c236t-ctl set (degrees).',
+      description: 'Changing a value writes it immediately via c236t-ctl set (degrees). Values load from the device.',
     });
     page.add(control);
-    tempRow(control, 'Heating start (DP 107)', 'temp_heatStart', settings);
-    tempRow(control, 'Heating stop (DP 108)', 'temp_heatStop', settings);
-    tempRow(control, 'Cooling start (DP 134)', 'temp_coolStart', settings);
-    tempRow(control, 'Cooling stop (DP 135)', 'temp_coolStop', settings);
+    makeTempRow(control, 'Heating start (DP 107)', 'temp_heatStart', '107');
+    makeTempRow(control, 'Heating stop (DP 108)', 'temp_heatStop', '108');
+    makeTempRow(control, 'Cooling start (DP 134)', 'temp_coolStart', '134');
+    makeTempRow(control, 'Cooling stop (DP 135)', 'temp_coolStop', '135');
 
     const alarms = new Adw.PreferencesGroup({
       title: 'Alarms',
     });
     page.add(alarms);
-    tempRow(alarms, 'High alarm (DP 109)', 'ah_alarm', settings);
-    tempRow(alarms, 'Low alarm (DP 110)', 'al_alarm', settings);
+    makeTempRow(alarms, 'High alarm (DP 109)', 'ah_alarm', '109');
+    makeTempRow(alarms, 'Low alarm (DP 110)', 'al_alarm', '110');
 
     const ttlRow = new Adw.SpinRow({
       title: 'Cooling delay (DP 111, seconds)',
       adjustment: new Gtk.Adjustment({ lower: 0, upper: 3600, step_increment: 10, value: 0 }),
     });
     ttlRow.connect('notify::value', () => {
-      const binary = settings.get_string('binary').trim() || '/usr/bin/c236t-ctl';
+      if (filling) return;
       const v = Math.round(ttlRow.get_value());
-      spawnSet(binary, [`cool_cd=${v}`], (ok, msg) => {
+      spawnBin(binary(), ['set', `cool_cd=${v}`], (ok, msg) => {
         log(`C236T prefs set cool_cd=${v}: ${ok ? 'ok' : msg}`);
       });
     });
     alarms.add(ttlRow);
+    controls.push({ row: ttlRow, dpId: '111', divide: 1 });
+
+    // Load current device values so reopening prefs shows real numbers.
+    spawnBin(binary(), ['status', '--json'], (ok, out) => {
+      if (!ok) {
+        log(`C236T prefs status failed: ${out}`);
+        return;
+      }
+      try {
+        const dps = JSON.parse(out).dps || {};
+        filling = true;
+        for (const c of controls) {
+          const raw = dps[c.dpId];
+          if (typeof raw === 'number') c.row.set_value(raw / c.divide);
+        }
+        filling = false;
+      } catch (e) {
+        log(`C236T prefs parse failed: ${e.message}`);
+      }
+    });
   }
 }
