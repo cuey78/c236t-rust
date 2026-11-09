@@ -1,0 +1,16 @@
+<schemalist>
+  <schema id="org.gnome.shell.extensions.c236t" path="/org/gnome/shell/extensions/c236t/">
+    <key name="interval" type="i">
+      <default>30</default>
+      <description>Poll interval in seconds (10..300).</description>
+    </key>
+    <key name="binary" type="s">
+      <default>"/usr/bin/c236t-ctl"</default>
+      <description>Path to c236t-ctl binary.</description>
+    </key>
+    <key name="show-output" type="b">
+      <default>true</default>
+      <description>Show output state (COOL_ON etc) in the label.</description>
+    </key>
+  </schema>
+</schemalist>

@@ -1,0 +1,9 @@
+{
+  "uuid": "c236t@local",
+  "name": "C236T Indicator",
+  "description": "Top-bar temperature + output for the INKBIRD C236T via c236t-ctl (status --json).",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "version": 1,
+  "settings-schema": "org.gnome.shell.extensions.c236t",
+  "url": "https://github.com/cuey78/c236t-rust"
+}
