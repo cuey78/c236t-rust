@@ -1,0 +1,16 @@
+/target
+# Secrets / local config (never commit)
+.env
+.env.*
+!.env.example
+c236t.toml
+config.toml
+.c236t_token
+*.keystore
+# Binaries (ship APKs via GitHub Releases, not the repo)
+*.apk
+*.aab
+base.apk
+# Logs / captures
+*.log
+*.pcap

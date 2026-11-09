@@ -1,0 +1,11 @@
+# C236T Controller configuration (TOML)
+# Copy to c236t.toml and fill in the values.
+# Or run `c236t-ctl setup` to generate it.
+#
+# Local LAN control (primary path). TOML handles quoting automatically —
+# any 16-byte key is safe as-is.
+
+local_key = "your-16-byte-local-key"
+ip = "192.168.1.100"
+port = 6668
+device_id = "your-device-id"

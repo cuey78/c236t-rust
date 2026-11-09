@@ -1,0 +1,51 @@
+[package]
+name = "c236t-ctl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# MQTT client (ThingCloud/Tuya uses MQTT)
+rumqttc = "0.15"
+
+# TLS for MQTT connection
+tokio-rustls = { version = "0.26", features = ["ring"] }
+rustls = "0.23"
+
+# JSON for DP commands
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# HTTP client for login/API calls
+reqwest = { version = "0.11", features = ["json"] }
+
+# URL encoding
+url = "2.5"
+
+# Environment variables
+dotenv = "0.15"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Hex encoding for DP 121 (time schedules)
+hex = "0.4"
+
+# UUID for signing nonces
+uuid = { version = "1.17", features = ["v4"] }
+
+# HMAC-SHA256 for ThingCloud API signing
+hmac = "0.12"
+sha2 = "0.10"
+
+# Local LAN Tuya 3.5 protocol (6699 / AES-GCM)
+aes-gcm = "0.10"
+rand = "0.8"
+
+# Restore default SIGPIPE handling on Unix (quiet exit when piped to head)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
