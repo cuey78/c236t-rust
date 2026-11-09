@@ -1,7 +1,7 @@
 /*
  * C236T Native Controller - local LAN control over Tuya protocol 3.5.
  *
- * Device:  INKBIRD C236T (configured via c236t.toml)
+ * Device:  INKBIRD C236T (configured via ~/.config/c236t/c236t.toml)
  *
  * Usage:
  *   c236t-ctl status
@@ -13,8 +13,12 @@
  *   c236t-ctl list
  *   c236t-ctl discover
  *   c236t-ctl setup
+ *   c236t-ctl status --json       machine-readable JSON (for extensions/scripts)
  *
- * Configuration (c236t.toml, env vars, or legacy .env):
+ * Add `--json` to status/get/list/discover/set/watch for JSON output.
+ * Temperatures in JSON are raw wire values (hundredths); divide by 100.
+ *
+ * Configuration (~/.config/c236t/c236t.toml, env vars, or legacy .env):
  *   local_key / THING_LOCAL_KEY   device local key (required)
  *   ip / THING_LOCAL_IP           device LAN address (required)
  *   port / THING_LOCAL_PORT       device LAN port (default 6668)
@@ -66,18 +70,36 @@ fn main() {
         std::process::exit(2);
     }
 
+    // Global `--json` switch: machine-readable output for extensions/scripts.
+    // Exact match only, so `raw` payloads containing "--json" are unaffected.
+    let json_mode = args.iter().any(|a| a == "--json");
+    let args: Vec<String> = args
+        .into_iter()
+        .filter(|a| a != "--json")
+        .collect();
+    if args.is_empty() {
+        usage();
+        std::process::exit(2);
+    }
+
     let result = match args[0].as_str() {
-        "status" => config().and_then(|cfg| cmd_status(&cfg)),
-        "get" => config().and_then(|cfg| cmd_get(&cfg, args.get(1))),
-        "set" => config().and_then(|cfg| cmd_set(&cfg, &args[1..])),
-        "watch" => config().and_then(|cfg| cmd_watch(&cfg)),
-        "raw" => config().and_then(|cfg| cmd_raw(&cfg, args.get(1))),
+        "status" => config().and_then(|cfg| cmd_status(&cfg, json_mode)),
+        "get" => config().and_then(|cfg| cmd_get(&cfg, args.get(1), json_mode)),
+        "set" => config().and_then(|cfg| cmd_set(&cfg, &args[1..], json_mode)),
+        "watch" => config().and_then(|cfg| cmd_watch(&cfg, json_mode)),
+        "raw" => config().and_then(|cfg| cmd_raw(&cfg, args.get(1), json_mode)),
         "list" => {
-            cmd_list();
+            cmd_list(json_mode);
             Ok(())
         }
-        "discover" => cmd_discover(&args[1..]),
-        "setup" => cmd_setup(&args[1..]),
+        "discover" => cmd_discover(&args[1..], json_mode),
+        "setup" => {
+            if json_mode {
+                Err("setup does not support --json".to_string())
+            } else {
+                cmd_setup(&args[1..])
+            }
+        }
         "help" | "-h" | "--help" => {
             usage();
             Ok(())
@@ -154,26 +176,52 @@ fn connect(cfg: &Config) -> Result<C236tClient, String> {
         .map_err(|e| format!("could not connect to {}:{} - {e}", cfg.ip, cfg.port))
 }
 
-fn cmd_status(cfg: &Config) -> Result<(), String> {
+fn cmd_status(cfg: &Config, json_mode: bool) -> Result<(), String> {
+    let mut client = connect(cfg)?;
+    let dps = client
+        .query_snapshot(Duration::from_millis(1200))
+        .map_err(|e| format!("DP query failed: {e}"))?;
+    client.close();
+
+    if json_mode {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "device_id": cfg.dev_id,
+                "ip": cfg.ip,
+                "port": cfg.port,
+                "count": dps.len(),
+                "dps": sorted_dps_json(&dps),
+            }))
+            .unwrap()
+        );
+        return Ok(());
+    }
+
     if cfg.dev_id == "unknown" || cfg.dev_id.is_empty() {
         println!("C236T at {}:{}", cfg.ip, cfg.port);
     } else {
         println!("C236T {} at {}:{}", cfg.dev_id, cfg.ip, cfg.port);
     }
-    let mut client = connect(cfg)?;
     if let Some(key) = client.session_key() {
         println!("session key: {}", hex::encode(key));
     }
-    let dps = client
-        .query_snapshot(Duration::from_millis(1200))
-        .map_err(|e| format!("DP query failed: {e}"))?;
     println!("{} data points\n", dps.len());
     print_dps(&dps, None);
-    client.close();
     Ok(())
 }
 
-fn cmd_get(cfg: &Config, key: Option<&String>) -> Result<(), String> {
+fn sorted_dps_json(dps: &HashMap<String, Value>) -> serde_json::Value {
+    let mut entries: Vec<(&String, &Value)> = dps.iter().collect();
+    entries.sort_by_key(|(id, _)| id.parse::<u32>().unwrap_or(u32::MAX));
+    let mut map = serde_json::Map::new();
+    for (id, value) in entries {
+        map.insert(id.clone(), value.clone());
+    }
+    Value::Object(map)
+}
+
+fn cmd_get(cfg: &Config, key: Option<&String>, json_mode: bool) -> Result<(), String> {
     let key = key.ok_or_else(|| "usage: c236t-ctl get <dp-id|name>".to_string())?;
     let info = dp::dp_info(key);
     let id = info.map(|i| i.id.to_string()).unwrap_or_else(|| key.clone());
@@ -186,6 +234,23 @@ fn cmd_get(cfg: &Config, key: Option<&String>) -> Result<(), String> {
 
     match dps.get(&id) {
         Some(value) => {
+            if json_mode {
+                let name = info.map(|i| i.name).unwrap_or("unknown");
+                let description = info.map(|i| i.description).unwrap_or("");
+                let display = dp::format_dp(info, value);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({
+                        "id": id,
+                        "name": name,
+                        "value": value,
+                        "display": display,
+                        "description": description,
+                    }))
+                    .unwrap()
+                );
+                return Ok(());
+            }
             let name = info.map(|i| i.name).unwrap_or("unknown");
             println!("{id} {name} = {}", dp::format_dp(info, value));
             if let Some(info) = info {
@@ -197,7 +262,7 @@ fn cmd_get(cfg: &Config, key: Option<&String>) -> Result<(), String> {
     }
 }
 
-fn cmd_set(cfg: &Config, assignments: &[String]) -> Result<(), String> {
+fn cmd_set(cfg: &Config, assignments: &[String], json_mode: bool) -> Result<(), String> {
     if assignments.is_empty() {
         return Err("usage: c236t-ctl set <dp>=<value> [<dp>=<value> ...]".to_string());
     }
@@ -210,12 +275,14 @@ fn cmd_set(cfg: &Config, assignments: &[String]) -> Result<(), String> {
         let info = dp::dp_info(key)
             .ok_or_else(|| format!("unknown DP `{key}` (run `c236t-ctl list`)"))?;
         let value = parse_value(info, raw)?;
-        println!(
-            "  {} = {} ({})",
-            info.name,
-            dp::format_dp(Some(info), &value),
-            info.id
-        );
+        if !json_mode {
+            println!(
+                "  {} = {} ({})",
+                info.name,
+                dp::format_dp(Some(info), &value),
+                info.id
+            );
+        }
         dps.insert(info.id.to_string(), value);
     }
 
@@ -223,7 +290,9 @@ fn cmd_set(cfg: &Config, assignments: &[String]) -> Result<(), String> {
     client
         .control_dps(&dps)
         .map_err(|e| format!("control failed: {e}"))?;
-    println!("device acknowledged; re-reading state...");
+    if !json_mode {
+        println!("device acknowledged; re-reading state...");
+    }
 
     // Give the firmware a moment to apply the change, then confirm.
     std::thread::sleep(Duration::from_millis(300));
@@ -231,6 +300,29 @@ fn cmd_set(cfg: &Config, assignments: &[String]) -> Result<(), String> {
         .query_snapshot(Duration::from_millis(800))
         .map_err(|e| format!("DP query failed: {e}"))?;
     client.close();
+
+    if json_mode {
+        let mut verified = serde_json::Map::new();
+        for id in dps.keys() {
+            match state.get(id) {
+                Some(value) => {
+                    verified.insert(id.clone(), value.clone());
+                }
+                None => {
+                    verified.insert(id.clone(), Value::Null);
+                }
+            }
+        }
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "applied": sorted_dps_json(&dps),
+                "verified": Value::Object(verified),
+            }))
+            .unwrap()
+        );
+        return Ok(());
+    }
 
     for id in dps.keys() {
         let info = dp::dp_info(id);
@@ -242,7 +334,7 @@ fn cmd_set(cfg: &Config, assignments: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_raw(cfg: &Config, arg: Option<&String>) -> Result<(), String> {
+fn cmd_raw(cfg: &Config, arg: Option<&String>, json_mode: bool) -> Result<(), String> {
     let arg = arg.ok_or_else(|| "usage: c236t-ctl raw '<json>'".to_string())?;
     let value: Value = serde_json::from_str(arg).map_err(|e| format!("invalid JSON: {e}"))?;
     let mut client = connect(cfg)?;
@@ -250,30 +342,47 @@ fn cmd_raw(cfg: &Config, arg: Option<&String>) -> Result<(), String> {
         .control_json(value)
         .map_err(|e| format!("control failed: {e}"))?;
     client.close();
-    println!("device acknowledged");
+    if json_mode {
+        println!(r#"{{"ok":true}}"#);
+    } else {
+        println!("device acknowledged");
+    }
     Ok(())
 }
 
-fn cmd_watch(cfg: &Config) -> Result<(), String> {
+fn cmd_watch(cfg: &Config, json_mode: bool) -> Result<(), String> {
     loop {
         match C236tClient::connect(&cfg.ip, cfg.port, &cfg.local_key) {
             Ok(mut client) => {
-                println!(
-                    "[{}] connected, session key {}\n",
-                    now(),
-                    client
-                        .session_key()
-                        .map(hex::encode)
-                        .unwrap_or_else(|| "?".to_string())
-                );
+                if !json_mode {
+                    println!(
+                        "[{}] connected, session key {}\n",
+                        now(),
+                        client
+                            .session_key()
+                            .map(hex::encode)
+                            .unwrap_or_else(|| "?".to_string())
+                    );
+                }
                 let mut unit_f = None;
                 if let Ok(dps) = client.query_snapshot(Duration::from_millis(800)) {
                     if let Some(v) = dps.get("106").and_then(|v| v.as_bool()) {
                         unit_f = Some(v);
                     }
-                    print_dps(&dps, unit_f);
+                    if json_mode {
+                        println!(
+                            "{}",
+                            json!({"type": "snapshot", "t": now(), "dps": sorted_dps_json(&dps)})
+                        );
+                        use std::io::Write as _;
+                        std::io::stdout().flush().ok();
+                    } else {
+                        print_dps(&dps, unit_f);
+                    }
                 }
-                println!("\nwatching for reports (Ctrl-C to stop)\n");
+                if !json_mode {
+                    println!("\nwatching for reports (Ctrl-C to stop)\n");
+                }
 
                 let mut last_heartbeat = Instant::now();
                 loop {
@@ -293,15 +402,28 @@ fn cmd_watch(cfg: &Config) -> Result<(), String> {
                                         if let Some(v) = dps.get("106").and_then(|v| v.as_bool()) {
                                             unit_f = Some(v);
                                         }
-                                        println!("[{}] report ({} DP)", now(), dps.len());
-                                        print_dps(&dps, unit_f);
+                                        if json_mode {
+                                            println!(
+                                                "{}",
+                                                json!({"type": "report", "t": now(), "dps": sorted_dps_json(&dps)})
+                                            );
+                                            use std::io::Write as _;
+                                            std::io::stdout().flush().ok();
+                                        } else {
+                                            println!("[{}] report ({} DP)", now(), dps.len());
+                                            print_dps(&dps, unit_f);
+                                        }
                                     }
                                     Err(e) => eprintln!("[{}] bad report: {e}", now()),
                                 },
                                 Err(e) => eprintln!("[{}] bad report: {e}", now()),
                             },
                             protocol::CMD_HEARTBEAT => {}
-                            other => println!("[{}] cmd {other}", now()),
+                            other => {
+                                if !json_mode {
+                                    println!("[{}] cmd {other}", now());
+                                }
+                            }
                         },
                         Err(e) if protocol::is_timeout(&e) => {}
                         Err(e) => {
@@ -318,7 +440,29 @@ fn cmd_watch(cfg: &Config) -> Result<(), String> {
     }
 }
 
-fn cmd_list() {
+fn cmd_list(json_mode: bool) {
+    if json_mode {
+        let items: Vec<Value> = DP_TABLE
+            .iter()
+            .map(|info| {
+                let kind = match info.kind {
+                    DpKind::Bool => "bool",
+                    DpKind::Int => "int",
+                    DpKind::Temp => "temp",
+                    DpKind::Text => "text",
+                    DpKind::Momentary => "trigger",
+                };
+                json!({
+                    "id": info.id,
+                    "name": info.name,
+                    "kind": kind,
+                    "description": info.description,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&Value::Array(items)).unwrap());
+        return;
+    }
     println!(
         "{:<4} {:<22} {:<9} {}",
         "DP", "name", "type", "description"
@@ -445,17 +589,38 @@ fn parse_timeout_value(v: &str) -> Result<u64, String> {
     Ok(n)
 }
 
-fn cmd_discover(args: &[String]) -> Result<(), String> {
+fn cmd_discover(args: &[String], json_mode: bool) -> Result<(), String> {
     let timeout = parse_timeout(args, 8)?;
     let local_ip = discovery::local_ipv4().unwrap_or_else(|| "<unknown>".to_string());
-    println!(
-        "Scanning for Tuya devices on UDP 7000 for {}s (local IP {})...",
-        timeout.as_secs(),
-        local_ip
-    );
+    if !json_mode {
+        println!(
+            "Scanning for Tuya devices on UDP 7000 for {}s (local IP {})...",
+            timeout.as_secs(),
+            local_ip
+        );
+    }
     let (devices, warnings) = discovery::discover(timeout);
-    for w in &warnings {
-        eprintln!("warning: {w}");
+    if !json_mode {
+        for w in &warnings {
+            eprintln!("warning: {w}");
+        }
+    }
+    if json_mode {
+        let items: Vec<Value> = devices
+            .iter()
+            .map(|d| {
+                json!({
+                    "ip": d.ip,
+                    "id": d.id,
+                    "product_key": d.product_key,
+                    "version": d.version,
+                    "uuid": d.uuid,
+                    "is_c236t": d.is_c236t(),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&Value::Array(items)).unwrap());
+        return Ok(());
     }
     if devices.is_empty() {
         println!("No devices found.");
@@ -717,15 +882,26 @@ fn usage() {
            c236t-ctl list                   List all known data points\n\
            c236t-ctl discover [--timeout <secs>]  Find Tuya devices on the LAN (UDP 7000)\n\
            c236t-ctl setup [--ip <ip>] [--port <port>] [--key <localKey>]\n\
-                                Interactive setup; verifies the handshake, then writes c236t.toml\n\
+                                Interactive setup; verifies the handshake, then writes\n\
+                                ~/.config/c236t/c236t.toml (creates folder)\n\
                                 (--id is accepted but optional; never prompted)\n\
+         \n\
+         Add `--json` for machine-readable output (extensions/scripts):\n\
+           c236t-ctl status --json          device_id/ip/port/count/dps\n\
+           c236t-ctl get <dp> --json        id/name/value/display/description\n\
+           c236t-ctl list --json            id/name/kind/description array\n\
+           c236t-ctl discover --json        ip/id/product_key/version array\n\
+           c236t-ctl set <dp>=<v> --json    applied/verified\n\
+           c236t-ctl watch --json           JSON Lines: snapshot, then reports\n\
+         \n\
+         Temperatures in JSON are raw wire values (hundredths: 4028 = 40.28°).\n\
          \n\
          <dp> is a numeric DP id or a name from `c236t-ctl list`.\n\
          Temperatures are entered in degrees (e.g. 25 or 25.5).\n\
          Switches accept on/off, true/false, 1/0.\n\
          \n\
-         Configuration (precedence: shell env > c236t.toml > .env):\n\
-           c236t.toml          local_key (required, 16 bytes), ip (required), port, device_id\n\
+         Configuration (precedence: shell env > XDG config > ./c236t.toml > .env):\n\
+           ~/.config/c236t/c236t.toml  local_key (required, 16 bytes), ip (required), port, device_id\n\
            C236T_CONFIG_FILE   explicit config file path\n\
            THING_LOCAL_KEY     device local key (shell env override)\n\
            THING_LOCAL_IP      device LAN address (required)\n\

@@ -18,7 +18,7 @@ pub use dp::{
     DpInfo, DpKind, DpValue, HeatCoolingMode, OutputState, SocketState, TimeMode, WorkMode,
     DP_TABLE,
 };
-pub use config::{canonical_path, find_config_file, load_file_config, parse_config_str, save_file_config, FileConfig};
+pub use config::{canonical_path, find_config_file, load_file_config, parse_config_str, save_file_config, user_config_dir, user_config_path, FileConfig};
 pub use discovery::{broadcast_targets, discover, local_ipv4, DiscoveredDevice};
 pub use mqtt::{C236tMqtt, MqttConfig};
 pub use protocol::{dps_from_json, is_timeout, pack_frame, C236tClient, Frame};

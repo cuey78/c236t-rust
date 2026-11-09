@@ -137,6 +137,20 @@ c236t-ctl setup [--ip <ip>] [--port <port>] [--key <localKey>]
                                  (--id accepted, never prompted)
 ```
 
+Add `--json` for machine-readable output (extensions, scripts, GNOME):
+
+* `status --json` → `{device_id,ip,port,count,dps}` (raw wire values)
+* `get <dp> --json` → `{id,name,value,display,description}`
+* `list --json` → `[{id,name,kind,description}, …]`
+* `discover --json` → `[{ip,id,product_key,version,uuid,is_c236t}, …]`
+* `set <dp>=<v> --json` → `{applied,verified}`
+* `watch --json` → JSON Lines: one `{"type":"snapshot",…}` then
+  `{"type":"report",…}` per line
+* `raw --json` → `{"ok":true}`; `setup` rejects `--json`
+
+Temperatures in JSON are raw wire values (hundredths: `4028` = 40.28°).
+DP IDs are strings (`"129"`), values keep their wire types.
+
 Value handling:
 
 * **Bool / trigger:** `on`/`off`, `true`/`false`, `1`/`0`
@@ -189,8 +203,9 @@ round-trip, `raw` control, `watch` reports, and physical output changes.
 ## Configuration
 
 Use `setup` (see Quick start), or copy `c236t.example.toml` to
-`c236t.toml` (searched upward; `config.toml` is also recognised, or set
-`C236T_CONFIG_FILE`):
+`~/.config/c236t/c236t.toml` and edit it manually (`setup` creates the
+folder `~/.config/c236t/` with `0700` if missing; `./c236t.toml` upward
+search and `C236T_CONFIG_FILE` are fallbacks):
 
 ```toml
 # c236t.toml
@@ -207,15 +222,17 @@ device_id = "your-device-id"   # optional, display only
 | `port` | no | `6668` | `THING_LOCAL_PORT` |
 | `device_id` | no | – | `THING_DEV_ID` |
 
-Precedence: shell env > `c236t.toml` > legacy `.env`.
+Precedence: shell env > `~/.config/c236t/c236t.toml` (XDG) >
+`./c236t.toml` > legacy `.env`.
 
 TOML was chosen over `.env`/plain text and JSON: it is unambiguous,
 supports comments, and the serializer handles quoting/escaping for any
 16-byte key. JSON has no comments; ad-hoc `key=value` reintroduces the
 same `$`/`"`/`\` escaping bugs as `.env`.
 
-`c236t.toml` is written `0600`. `setup` only saves after a successful
-handshake + query; a wrong key never overwrites an existing file.
+`~/.config/c236t/c236t.toml` is written `0600` (dir `0700`). `setup`
+only saves after a successful handshake + query; a wrong key never
+overwrites an existing file.
 
 > The local key is per-device and is **not** the account password, and
 > is not revealed by discovery.

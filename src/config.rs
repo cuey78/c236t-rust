@@ -1,6 +1,10 @@
 /*
  * TOML configuration file (`c236t.toml`).
  *
+ * Canonical path: `$XDG_CONFIG_HOME/c236t/c236t.toml`
+ * (default `~/.config/c236t/c236t.toml`), NOT `/usr/bin` and NOT the
+ * working directory. `setup` creates the folder if needed.
+ *
  * Canonical layout (written by `c236t-ctl setup`):
  *
  * ```toml
@@ -19,9 +23,11 @@
  *
  * Precedence when resolving settings (highest first):
  *   1. process environment (explicit shell vars)
- *   2. `c236t.toml` / `config.toml` found from the working directory upward
- *   3. `.env` (legacy dotenv fallback)
- *   4. built-in defaults for ip/port/device_id
+ *   2. `$C236T_CONFIG_FILE` if set, else
+ *      `~/.config/c236t/c236t.toml` (XDG, created by `setup`)
+ *   3. `./c236t.toml` / `config.toml` from the working directory upward
+ *      (portable fallback)
+ *   4. `.env` (legacy dotenv fallback)
  */
 
 use serde::{Deserialize, Serialize};
@@ -80,22 +86,47 @@ pub fn env_config_path() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// User config directory: `$XDG_CONFIG_HOME/c236t` or
+/// `$HOME/.config/c236t`.
+pub fn user_config_dir() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.trim().is_empty() {
+            return PathBuf::from(xdg).join("c236t");
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.trim().is_empty() {
+            return PathBuf::from(home).join(".config").join("c236t");
+        }
+    }
+    PathBuf::from(".config").join("c236t")
+}
+
+/// Default config path: `~/.config/c236t/c236t.toml`.
+pub fn user_config_path() -> PathBuf {
+    user_config_dir().join("c236t.toml")
+}
+
 /// Canonical path `setup` writes to.
 pub fn canonical_path() -> PathBuf {
     if let Some(p) = env_config_path() {
         return p;
     }
-    PathBuf::from("c236t.toml")
+    user_config_path()
 }
 
-/// Locate the config file: env override, then `./c236t.toml`,
-/// `./config.toml`, walking up parents (mirrors dotenv's upward search).
+/// Locate the config file: env override, then XDG user config, then
+/// `./c236t.toml` / `config.toml` walking up from cwd (portable fallback).
 pub fn find_config_file() -> Option<PathBuf> {
     if let Some(p) = env_config_path() {
         if p.exists() {
             return Some(p);
         }
         return None;
+    }
+    let user = user_config_path();
+    if user.is_file() {
+        return Some(user);
     }
     let mut dir: Option<PathBuf> = std::env::current_dir().ok();
     while let Some(d) = dir {
@@ -127,8 +158,23 @@ pub fn parse_config_str(text: &str) -> Result<FileConfig, String> {
     FileConfig::from_toml(text)
 }
 
-/// Write the config file, restricting permissions to `0600` on Unix.
+/// Write the config file, creating its folder (`0700`) and restricting
+/// the file to `0600` on Unix.
 pub fn save_file_config(path: &Path, cfg: &FileConfig) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(
+                    parent,
+                    std::fs::Permissions::from_mode(0o700),
+                );
+            }
+        }
+    }
     let text = cfg.to_toml()?;
     std::fs::write(path, &text).map_err(|e| format!("could not write {}: {e}", path.display()))?;
     #[cfg(unix)]
@@ -187,5 +233,13 @@ device_id = "example-device-id"
     #[test]
     fn rejects_bad_toml() {
         assert!(FileConfig::from_toml("port = ").is_err());
+    }
+
+    #[test]
+    fn user_config_path_is_xdg() {
+        // Just verify it ends with c236t/c236t.toml under an XDG-style dir.
+        let p = user_config_path();
+        assert!(p.ends_with(std::path::Path::new("c236t").join("c236t.toml")));
+        assert_eq!(canonical_path(), p);
     }
 }
