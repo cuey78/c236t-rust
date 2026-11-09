@@ -27,10 +27,12 @@ export default class C236TExtension extends Extension {
     this._button.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('C236T — INKBIRD'));
     this._tempItem = new PopupMenu.PopupMenuItem('Temperature: …');
     this._outputItem = new PopupMenu.PopupMenuItem('Output: …');
-    this._extraItem = new PopupMenu.PopupMenuItem('…');
+    this._heatItem = new PopupMenu.PopupMenuItem('Heat: …');
+    this._coolItem = new PopupMenu.PopupMenuItem('Cool: …');
     this._button.menu.addMenuItem(this._tempItem);
     this._button.menu.addMenuItem(this._outputItem);
-    this._button.menu.addMenuItem(this._extraItem);
+    this._button.menu.addMenuItem(this._heatItem);
+    this._button.menu.addMenuItem(this._coolItem);
 
     const refresh = new PopupMenu.PopupMenuItem('Refresh now');
     refresh.connect('activate', () => self._update());
@@ -39,14 +41,14 @@ export default class C236TExtension extends Extension {
     const mkToggle = (label, setter) => {
       const sw = new PopupMenu.PopupSwitchMenuItem(label, false);
       sw.connect('toggled', (item, on) => {
-        self._runBin([setter(on)], () => self._update(), () => self._update());
+        self._runBin(['set', setter(on)], () => self._update(), () => self._update());
       });
       sw.setSensitive(false);
       self._button.menu.addMenuItem(sw);
       return sw;
     };
-    this._ctrlSw = mkToggle('Temp control', on => `set temp_ctrl_sw=${on ? 'on' : 'off'}`);
-    this._buzSw = mkToggle('Buzzer', on => `set buz_sw=${on ? 'on' : 'off'}`);
+    this._ctrlSw = mkToggle('Temp control', on => `temp_ctrl_sw=${on ? 'on' : 'off'}`);
+    this._buzSw = mkToggle('Buzzer', on => `buz_sw=${on ? 'on' : 'off'}`);
     this._switches = [this._ctrlSw, this._buzSw];
 
     Main.panel.addToStatusArea('c236t-indicator', this._button, 1, 'right');
@@ -110,8 +112,8 @@ export default class C236TExtension extends Extension {
         this._tempItem.label.text = `Temperature: ${temp.toFixed(2)}${unit}`;
         this._outputItem.label.text = `Output: ${output}`;
         const fmt = v => (typeof v === 'number' ? `${(v / 100).toFixed(1)}${unit}` : '—');
-        this._extraItem.label.text =
-            `Heat ${fmt(heatStart)}→${fmt(heatStop)} · Cool ${fmt(coolStart)}→${fmt(coolStop)}`;
+        this._heatItem.label.text = `Heat: ${fmt(heatStart)} → ${fmt(heatStop)}`;
+        this._coolItem.label.text = `Cool: ${fmt(coolStart)} → ${fmt(coolStop)}`;
         const ctrlOn = !!dps['117'];
         const buzOn = !!dps['120'];
         this._ctrlSw.setToggleState(ctrlOn);
@@ -121,14 +123,16 @@ export default class C236TExtension extends Extension {
         this._label.text = 'C236T n/a';
         this._tempItem.label.text = `Error: ${e.message || e}`;
         this._outputItem.label.text = 'Check config: ~/.config/c236t/c236t.toml';
-        this._extraItem.label.text = 'Run: /usr/bin/c236t-ctl status';
+        this._heatItem.label.text = 'Run: /usr/bin/c236t-ctl status';
+        this._coolItem.label.text = '';
         this._switches.forEach(s => s.setSensitive(false));
       }
     }, err => {
       this._label.text = 'C236T err';
       this._tempItem.label.text = `Error: ${err}`;
       this._outputItem.label.text = 'Check: /usr/bin/c236t-ctl status';
-      this._extraItem.label.text = 'Check: ~/.config/c236t/c236t.toml';
+      this._heatItem.label.text = 'Check: ~/.config/c236t/c236t.toml';
+      this._coolItem.label.text = '';
       this._switches.forEach(s => s.setSensitive(false));
     });
   }
