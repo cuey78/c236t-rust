@@ -136,6 +136,7 @@ export default class C236TExtension extends Extension {
   _runBin(args, onOk, onErr) {
     const argv = [this._binary(), ...args];
     const launcher = new Gio.SubprocessLauncher();
+    launcher.set_flags(Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
     let proc = null;
     try {
       proc = launcher.spawnv(argv);
@@ -149,8 +150,8 @@ export default class C236TExtension extends Extension {
         if (onErr) onErr('communicate failed');
         return;
       }
-      // Gio.Subprocess returns GLib.Bytes — decode via get_data() to Uint8Array.
-      const out = new TextDecoder().decode(stdout.get_data());
+      // Gio.Subprocess returns GLib.Bytes (or null if not piped) — guard nulls.
+      const out = new TextDecoder().decode(stdout ? stdout.get_data() : new Uint8Array());
       if (p.get_exit_status() !== 0) {
         const err = new TextDecoder().decode(stderr ? stderr.get_data() : new Uint8Array());
         if (onErr) onErr(err.trim() || `exit ${p.get_exit_status()}`);
