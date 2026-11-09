@@ -136,7 +136,6 @@ export default class C236TExtension extends Extension {
   _runBin(args, onOk, onErr) {
     const argv = [this._binary(), ...args];
     const launcher = new Gio.SubprocessLauncher();
-    launcher.set_cwd(null);
     let proc = null;
     try {
       proc = launcher.spawnv(argv);
