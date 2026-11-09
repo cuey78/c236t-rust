@@ -14,12 +14,33 @@ export default class C236TExtension extends Extension {
     this._settings = this.getSettings();
     // Icon-only in the top bar; temp shown on hover (tooltip).
     this._button = new PanelMenu.Button(0.0, 'C236T Indicator');
-    this._icon = new St.Icon({
-      icon_name: 'weather-temperature-symbolic',
+    // Prefer the bundled logo (icon.png / icon.svg in the extension dir),
+    // falling back to the stock temperature icon.
+    let iconParams = {
       style_class: 'system-status-icon',
       y_align: Clutter.ActorAlign.CENTER,
-    });
-    this._button.tooltip_text = 'C236T …';
+    };
+    let usedFileIcon = false;
+    for (const name of ['icon.png', 'icon.svg']) {
+      try {
+        const f = Gio.File.new_for_path(`${this.path}/${name}`);
+        if (f.query_exists(null)) {
+          iconParams = {
+            gicon: new Gio.FileIcon({ file: f }),
+            icon_size: 16,
+            style_class: 'system-status-icon',
+            y_align: Clutter.ActorAlign.CENTER,
+          };
+          usedFileIcon = true;
+          break;
+        }
+      } catch (e) {}
+    }
+    if (!usedFileIcon) {
+      iconParams.icon_name = 'weather-temperature-symbolic';
+    }
+    this._icon = new St.Icon(iconParams);
+    this._setTip('C236T …');
     const box = new St.BoxLayout({ style_class: 'panel-status-menu-box' });
     box.add_child(this._icon);
     this._button.add_child(box);
@@ -91,6 +112,17 @@ export default class C236TExtension extends Extension {
     return b || BIN_FALLBACK;
   }
 
+  _setTip(text) {
+    // PanelMenu.Button shows the tooltip from its inner St.Button.
+    for (const w of [this._button, this._button?.button, this._icon]) {
+      if (!w) continue;
+      try { w.tooltip_text = text; } catch (e) {}
+      try {
+        if (typeof w.set_tooltip_text === 'function') w.set_tooltip_text(text);
+      } catch (e) {}
+    }
+  }
+
   _update() {
     this._runBin(['status', '--json'], out => {
       try {
@@ -110,8 +142,7 @@ export default class C236TExtension extends Extension {
         const tip = showOutput
             ? `${temp.toFixed(1)}${unit} ${output}`
             : `${temp.toFixed(1)}${unit}`;
-        this._button.tooltip_text = tip;
-        this._icon.tooltip_text = tip;
+        this._setTip(tip);
         this._tempItem.label.text = `Temperature: ${temp.toFixed(2)}${unit}`;
         this._outputItem.label.text = `Output: ${output}`;
         const fmt = v => (typeof v === 'number' ? `${(v / 100).toFixed(1)}${unit}` : '—');
@@ -123,8 +154,7 @@ export default class C236TExtension extends Extension {
         this._buzSw.setToggleState(buzOn);
         this._switches.forEach(s => s.setSensitive(true));
       } catch (e) {
-        this._button.tooltip_text = `C236T n/a: ${e.message || e}`;
-        this._icon.tooltip_text = `C236T n/a: ${e.message || e}`;
+        this._setTip(`C236T n/a: ${e.message || e}`);
         this._tempItem.label.text = `Error: ${e.message || e}`;
         this._outputItem.label.text = 'Check config: ~/.config/c236t/c236t.toml';
         this._heatItem.label.text = 'Run: /usr/bin/c236t-ctl status';
@@ -132,8 +162,7 @@ export default class C236TExtension extends Extension {
         this._switches.forEach(s => s.setSensitive(false));
       }
     }, err => {
-      this._button.tooltip_text = `C236T err: ${err}`;
-      this._icon.tooltip_text = `C236T err: ${err}`;
+      this._setTip(`C236T err: ${err}`);
       this._tempItem.label.text = `Error: ${err}`;
       this._outputItem.label.text = 'Check: /usr/bin/c236t-ctl status';
       this._heatItem.label.text = 'Check: ~/.config/c236t/c236t.toml';
