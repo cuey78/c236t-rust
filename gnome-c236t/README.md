@@ -20,15 +20,13 @@ c236t-ctl setup
 # 3. Install the extension (user install, no sudo needed)
 mkdir -p ~/.local/share/gnome-shell/extensions/c236t@local
 cp -r gnome-c236t/* ~/.local/share/gnome-shell/extensions/c236t@local/
-# Compile settings schema
-mkdir -p ~/.local/share/glib-2.0/schemas
-cp gnome-c236t/schemas/*.xml ~/.local/share/glib-2.0/schemas/
-glib-compile-schemas ~/.local/share/glib-2.0/schemas/
+# Compile settings schema INSIDE the extension dir
+glib-compile-schemas ~/.local/share/gnome-shell/extensions/c236t@local/schemas/
 
-# 4. Restart GNOME Shell (X11: alt+f2 r) or reboot, then enable
+# 4. Wayland: log out/in (no shell restart). X11: alt+f2 r. Then enable
 gnome-extensions enable c236t@local
 # System install: cp -r gnome-c236t /usr/share/gnome-shell/extensions/c236t@local/
-#               sudo glib-compile-schemas /usr/share/glib-2.0/schemas/
+#               sudo glib-compile-schemas /usr/share/gnome-shell/extensions/c236t@local/schemas/
 ```
 
 Settings (Preferences): interval `10..300` s (default 30), binary path
